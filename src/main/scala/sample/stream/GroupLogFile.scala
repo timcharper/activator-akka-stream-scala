@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 import java.io.{ FileOutputStream, PrintWriter }
 import akka.stream.FlowMaterializer
 import akka.stream.scaladsl.Source
+import scala.concurrent.Future
 
 import scala.util.Try
 
@@ -29,13 +30,17 @@ object GroupLogFile {
         case other                  => "OTHER"
       }.
       // write lines of each group to a separate file
-      foreach {
+      map {
         case (level, groupFlow) =>
           val output = new PrintWriter(new FileOutputStream(s"target/log-$level.txt"), true)
           // close resource when the group stream is completed
           // foreach returns a future that we can key the close() off of
-          groupFlow.foreach(line => output.println(line)).onComplete(_ => Try(output.close()))
+          groupFlow.
+            foreach(line => output.println(line)).
+            andThen { case t => output.close(); t.get }
       }.
+      fold(Future.successful()) { (r, f) => r.flatMap(_ => f) }.
+      flatMap(identity).
       onComplete { _ =>
         Try(logFile.close())
         system.shutdown()
